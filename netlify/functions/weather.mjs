@@ -113,7 +113,8 @@ async function getForecast(grid) {
     return sum;
   }
 
-  function summarize(ymd, fromHour) {
+  // fromHour: 학교 기준(등하교 시간) 계산 시작 시각 / pureFrom: 순수 날씨 계산 시작 시각 (오늘=지금, 내일=0시)
+  function summarize(ymd, fromHour, pureFrom = 0) {
     const day = items.filter(i => i.fcstDate === ymd);
     if (!day.length) return null;
     const byHour = {};
@@ -126,6 +127,11 @@ async function getForecast(grid) {
     const rainHours = school.filter(([, v]) => num(v.PTY) > 0).map(([h, v]) => ({ hour: +h, pty: num(v.PTY) }));
     const mid = byHour[12] || byHour[13] || byHour[11] || {};
     const rainy = rainHours.find(r => r) || null;
+    // ── 순수 날씨 (학교 시간과 무관) ──
+    const ahead = Object.entries(byHour).filter(([h]) => +h >= pureFrom).sort((a, b) => a[0] - b[0]);
+    const popNow = ahead.length ? (num(ahead[0][1].POP) ?? null) : null;            // 지금 시각(가장 가까운 예보 시각)의 강수확률
+    const popDay = ahead.length ? Math.max(0, ...ahead.map(([, v]) => num(v.POP) || 0)) : null;   // 하루(남은 시간) 최고 강수확률
+    const firstRain = ahead.find(([, v]) => num(v.PTY) > 0);
     // 새벽 비: 0시부터 등교 시간(7시) 전까지 비/눈 예보 → 운동장이 젖어 있을 수 있음
     const dawnRain = Object.entries(byHour).some(([h, v]) => +h < SCHOOL_HOURS[0] && num(v.PTY) > 0);
     return {
@@ -138,12 +144,16 @@ async function getForecast(grid) {
       rainFrom: rainy ? rainy.hour : null,
       dawnRain,
       window: `${SCHOOL_TIME.start}~${SCHOOL_TIME.end}`,
+      // 순수 날씨
+      popNow, popDay,
+      rainFromDay: firstRain ? +firstRain[0] : null,
+      ptyDay: firstRain ? num(firstRain[1].PTY) : 0,
     };
   }
 
   return {
-    today: withLater(summarize(now.ymd, Math.max(SCHOOL_HOURS[0], now.h))),
-    tomorrow: summarize(tomorrowYmd, SCHOOL_HOURS[0]),
+    today: withLater(summarize(now.ymd, Math.max(SCHOOL_HOURS[0], now.h), now.h)),
+    tomorrow: summarize(tomorrowYmd, SCHOOL_HOURS[0], 0),
   };
 }
 
