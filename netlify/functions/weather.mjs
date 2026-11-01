@@ -103,6 +103,16 @@ async function getForecast(grid) {
   const num = v => (v == null || v === "") ? null : Number(String(v).replace(/[^\d.-]/g, ""));
 
   // fromHour: 오늘은 이미 지난 시간은 빼고 '지금부터 하교까지'만 봄
+  // 하교 시간이 지난 뒤(저녁·밤)에도 의미 있는 값을 보이도록: 지금부터 자정까지의 최대 강수확률
+  function withLater(sum) {
+    if (!sum) return sum;
+    const byHour = {};
+    for (const i of items) if (i.fcstDate === now.ymd && i.category === "POP") byHour[+i.fcstTime.slice(0, 2)] = num(i.fcstValue);
+    const later = Object.entries(byHour).filter(([h]) => +h >= now.h).map(([, v]) => v || 0);
+    sum.popLater = later.length ? Math.max(...later) : null;
+    return sum;
+  }
+
   function summarize(ymd, fromHour) {
     const day = items.filter(i => i.fcstDate === ymd);
     if (!day.length) return null;
@@ -132,7 +142,7 @@ async function getForecast(grid) {
   }
 
   return {
-    today: summarize(now.ymd, Math.max(SCHOOL_HOURS[0], now.h)),
+    today: withLater(summarize(now.ymd, Math.max(SCHOOL_HOURS[0], now.h))),
     tomorrow: summarize(tomorrowYmd, SCHOOL_HOURS[0]),
   };
 }
@@ -218,6 +228,22 @@ async function getAir(lat, lon, sido) {
 }
 
 // 운동장 활동 판단
+// 내일 운동장 판단 (하교 뒤 저녁·밤에 화면이 쓰는 값): 내일 등하교 시간(7:30~16:30) 예보 기준
+// 미세먼지는 내일 값을 알 수 없어 넣지 않음
+function judgeTomorrow(t) {
+  if (!t) return null;
+  const reasons = [];
+  let level = "ok";
+  const up = l => { if (l === "no" || level === "ok") level = l; };
+  if (t.rainHours?.length) { up("caution"); reasons.push(`${t.rainHours[0].hour}시쯤${t.rainHours[0].pty === 3 ? " 눈" : " 비"} 예보`); }
+  else if (t.popMax >= 60) { up("caution"); reasons.push(`강수확률 ${t.popMax}%`); }
+  if (t.dawnRain) { up("caution"); reasons.push("새벽 비 — 운동장이 젖어 있을 수 있어요"); }
+  if (t.tmx != null && t.tmx >= 33) { up("no"); reasons.push(`폭염 (최고 ${t.tmx}℃)`); }
+  else if (t.tmx != null && t.tmx >= 31) { up("caution"); reasons.push(`더위 (최고 ${t.tmx}℃)`); }
+  if (t.tmn != null && t.tmn <= -5) { up("caution"); reasons.push(`추위 (최저 ${t.tmn}℃)`); }
+  return { level, reasons, umbrella: (t.rainHours?.length > 0) || t.popMax >= 60 };
+}
+
 function judge(now, today, air, warnings) {
   const reasons = [];
   let level = "ok";                         // ok / caution / no
@@ -285,6 +311,7 @@ export default async (req) => {
     { now, today, tomorrow, air, warnings: warnings || [], warnTime,
       outdoor: judge(now, today, air, warnings),
       outdoorBase: judge(now, today, air, []),       // 화면이 최신 특보를 따로 받아 덧씌울 때 쓰는 기준값
+      outdoorTomorrow: judgeTomorrow(tomorrow),      // 16:30 이후 화면은 이 값(내일 기준)으로 신호등 표시
       errors, grid },
     { headers: {
       "Cache-Control": "public, max-age=300",
