@@ -6,7 +6,9 @@
 - `public/index.html` — 화면
 - `netlify/functions/schools.mjs` — 학교 찾기 (위치·IP·이름 검색)
 - `netlify/functions/meal.mjs` — 급식 (나이스)
-- `netlify/functions/weather.mjs` — 날씨 (기상청) + 미세먼지 (에어코리아)
+- `netlify/functions/weather.mjs` — 날씨 (기상청) + 미세먼지 (에어코리아) + 기상특보 반영
+- `netlify/functions/warnings.mjs` — 기상특보 확인용 (`/warnings.html` 화면에서 사용)
+- `netlify/lib/warnings-core.mjs` — 특보 해석·학교 지역 매칭 (반영할 특보 목록은 이 파일 맨 위)
 - `data/schools.csv` — 전국초중등학교위치표준데이터 (공공데이터포털 원본 CSV)
 - `tools/build-schools.mjs` — 배포할 때 CSV를 `generated/schools.json`으로 자동 변환
 
@@ -16,6 +18,7 @@
   - 기상청_단기예보 ((구)_동네예보) 조회서비스
   - 한국환경공단_에어코리아_대기오염정보
   - 한국환경공단_에어코리아_측정소정보
+  - 기상청_기상특보 조회서비스
 
 ## 학교 자료 새로 고치기
 1. 공공데이터포털에서 「전국초중등학교위치표준데이터」 CSV를 새로 내려받습니다.

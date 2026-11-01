@@ -6,7 +6,12 @@
 //   - 한국환경공단_에어코리아_대기오염정보
 //   - 한국환경공단_에어코리아_측정소정보   (가장 가까운 측정소 찾기)
 
-const SCHOOL_HOURS = [9, 15];   // 등교~하교 시간대 (강수 판단용)
+// 등교~하교 시간 (비·강수확률 판단 기준). 기상청 예보는 1시간 단위라
+// 07:30~16:30 이 걸쳐 있는 7시~16시 예보를 봅니다.
+import { warningsFor } from "../lib/warnings-core.mjs";
+
+const SCHOOL_TIME = { start: "07:30", end: "16:30" };
+const SCHOOL_HOURS = [Number(SCHOOL_TIME.start.slice(0, 2)), Number(SCHOOL_TIME.end.slice(0, 2))];
 
 const KMA = "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/";
 const AIR_BASE = "https://apis.data.go.kr/B552584/";
@@ -79,43 +84,56 @@ async function getNow(grid) {
   };
 }
 
-// 단기예보: 오늘 최저/최고, 수업 시간 강수확률·하늘
-async function getToday(grid) {
+// 단기예보: 오늘·내일 최저/최고, 등하교 시간 강수확률·비 오는 시간·하늘
+async function getForecast(grid) {
   const now = kstParts();
-  // 오늘 02시 발표분에 오늘 하루치(최저·최고 포함)가 모두 들어 있음
-  let baseDate = now.ymd, baseTime = "0200";
-  if (now.h < 2 || (now.h === 2 && now.m < 15)) { baseDate = kstParts(Date.now() - 86400e3).ymd; baseTime = "2300"; }
-  const items = await getJson(kmaUrl("getVilageFcst", baseDate, baseTime, grid, 1000));
+  const tomorrowYmd = kstParts(Date.now() + 86400e3).ymd;
+  // 전날 23시 발표분: 오늘 0시부터의 예보(새벽 포함)와 오늘·내일 최저/최고가 모두 들어 있음
+  const items = await getJson(kmaUrl("getVilageFcst", kstParts(Date.now() - 86400e3).ymd, "2300", grid, 1000));
 
   // 최신 발표분으로 덮어쓰기 (02,05,08,11,14,17,20,23시 발표, 10분쯤 뒤 공개)
   const bases = [2, 5, 8, 11, 14, 17, 20, 23].filter(h => h < now.h || (h === now.h && now.m >= 15));
-  if (bases.length && bases.at(-1) !== 2) {
+  if (bases.length) {
     try {
       const latest = await getJson(kmaUrl("getVilageFcst", now.ymd, String(bases.at(-1)).padStart(2, "0") + "00", grid, 1000));
       items.push(...latest);   // 뒤에 오는 값이 우선
     } catch (e) { /* 최신분 실패 시 02시 자료만 사용 */ }
   }
 
-  const today = items.filter(i => i.fcstDate === now.ymd);
-  const byHour = {};
-  for (const i of today) (byHour[+i.fcstTime.slice(0, 2)] ||= {})[i.category] = i.fcstValue;
   const num = v => (v == null || v === "") ? null : Number(String(v).replace(/[^\d.-]/g, ""));
-  const tmn = num(today.filter(i => i.category === "TMN").at(-1)?.fcstValue);
-  const tmx = num(today.filter(i => i.category === "TMX").at(-1)?.fcstValue);
-  const temps = Object.values(byHour).map(h => num(h.TMP)).filter(v => v != null);
 
-  const school = Object.entries(byHour).filter(([h]) => +h >= SCHOOL_HOURS[0] && +h <= SCHOOL_HOURS[1]);
-  const popMax = Math.max(0, ...school.map(([, v]) => num(v.POP) || 0));
-  const rainHours = school.filter(([, v]) => num(v.PTY) > 0).map(([h, v]) => ({ hour: +h, pty: num(v.PTY) }));
-  const mid = byHour[12] || byHour[13] || byHour[11] || {};
+  // fromHour: 오늘은 이미 지난 시간은 빼고 '지금부터 하교까지'만 봄
+  function summarize(ymd, fromHour) {
+    const day = items.filter(i => i.fcstDate === ymd);
+    if (!day.length) return null;
+    const byHour = {};
+    for (const i of day) (byHour[+i.fcstTime.slice(0, 2)] ||= {})[i.category] = i.fcstValue;
+    const tmn = num(day.filter(i => i.category === "TMN").at(-1)?.fcstValue);
+    const tmx = num(day.filter(i => i.category === "TMX").at(-1)?.fcstValue);
+    const temps = Object.values(byHour).map(h => num(h.TMP)).filter(v => v != null);
+    const school = Object.entries(byHour).filter(([h]) => +h >= fromHour && +h <= SCHOOL_HOURS[1]);
+    const popMax = Math.max(0, ...school.map(([, v]) => num(v.POP) || 0));
+    const rainHours = school.filter(([, v]) => num(v.PTY) > 0).map(([h, v]) => ({ hour: +h, pty: num(v.PTY) }));
+    const mid = byHour[12] || byHour[13] || byHour[11] || {};
+    const rainy = rainHours.find(r => r) || null;
+    // 새벽 비: 0시부터 등교 시간(7시) 전까지 비/눈 예보 → 운동장이 젖어 있을 수 있음
+    const dawnRain = Object.entries(byHour).some(([h, v]) => +h < SCHOOL_HOURS[0] && num(v.PTY) > 0);
+    return {
+      tmn: tmn ?? (temps.length ? Math.min(...temps) : null),
+      tmx: tmx ?? (temps.length ? Math.max(...temps) : null),
+      sky: num(mid.SKY),                  // 1 맑음, 3 구름많음, 4 흐림
+      pty: rainy ? rainy.pty : 0,         // 등하교 시간 중 비/눈 (0 없음, 1 비, 2 비/눈, 3 눈, 4 소나기)
+      popMax,
+      rainHours,
+      rainFrom: rainy ? rainy.hour : null,
+      dawnRain,
+      window: `${SCHOOL_TIME.start}~${SCHOOL_TIME.end}`,
+    };
+  }
 
   return {
-    tmn: tmn ?? (temps.length ? Math.min(...temps) : null),
-    tmx: tmx ?? (temps.length ? Math.max(...temps) : null),
-    sky: num(mid.SKY),            // 1 맑음, 3 구름많음, 4 흐림
-    pty: num(mid.PTY) || 0,       // 0 없음, 1 비, 2 비/눈, 3 눈, 4 소나기
-    popMax,
-    rainHours,
+    today: summarize(now.ymd, Math.max(SCHOOL_HOURS[0], now.h)),
+    tomorrow: summarize(tomorrowYmd, SCHOOL_HOURS[0]),
   };
 }
 
@@ -200,20 +218,31 @@ async function getAir(lat, lon, sido) {
 }
 
 // 운동장 활동 판단
-function judge(now, today, air) {
+function judge(now, today, air, warnings) {
   const reasons = [];
   let level = "ok";                         // ok / caution / no
+  // 기상특보 (학교 생활 관련만): 경보 → 실내 권장, 주의보 → 주의
+  for (const w of warnings || []) {
+    if (w.level === "경보") level = "no";
+    else if (level === "ok") level = "caution";
+    reasons.push(`${w.name} 발효 중`);
+  }
   const worst = Math.max(air?.grade10 || 0, air?.grade25 || 0);
   if (worst >= 3) { level = "no"; reasons.push(worst === 4 ? "미세먼지 매우나쁨" : "미세먼지 나쁨"); }
   if (now?.pty > 0 || now?.rain1h > 0) { level = "no"; reasons.push("지금 비/눈"); }
   else if (today?.rainHours?.length) { if (level === "ok") level = "caution"; reasons.push(`${today.rainHours[0].hour}시쯤 비 예보`); }
   else if (today?.popMax >= 60) { if (level === "ok") level = "caution"; reasons.push(`강수확률 ${today.popMax}%`); }
+  if (today?.dawnRain && !(now?.pty > 0)) {
+    if (level === "ok") level = "caution";
+    reasons.push("새벽에 비 — 운동장이 젖어 있을 수 있어요");
+  }
   const hi = today?.tmx ?? now?.temp;
   if (hi != null && hi >= 33) { level = "no"; reasons.push(`폭염 (최고 ${hi}℃)`); }
   else if (hi != null && hi >= 31) { if (level === "ok") level = "caution"; reasons.push(`더위 (최고 ${hi}℃)`); }
   if (now?.temp != null && now.temp <= -5) { if (level === "ok") level = "caution"; reasons.push(`추위 (${now.temp}℃)`); }
   if (now?.wind != null && now.wind >= 9) { if (level === "ok") level = "caution"; reasons.push(`강풍 (${now.wind}m/s)`); }
-  const umbrella = (now?.pty > 0) || (today?.rainHours?.length > 0) || (today?.popMax >= 60);
+  const umbrella = (now?.pty > 0) || (today?.rainHours?.length > 0) || (today?.popMax >= 60)
+    || (warnings || []).some(w => w.kind === "호우" || w.kind === "태풍");
   return { level, reasons, umbrella };
 }
 
@@ -228,19 +257,24 @@ export default async (req) => {
     return Response.json({ error: "lat, lon 값이 필요해요 (국내 좌표)." }, { status: 400 });
   }
   const grid = toGrid(lat, lon);
-  const [n, t, a] = await Promise.allSettled([getNow(grid), getToday(grid), getAir(lat, lon, sido)]);
+  const [n, t, a, wr] = await Promise.allSettled([getNow(grid), getForecast(grid), getAir(lat, lon, sido), warningsFor(sido)]);
   const now = n.status === "fulfilled" ? n.value : null;
-  const today = t.status === "fulfilled" ? t.value : null;
+  const today = t.status === "fulfilled" ? t.value.today : null;
+  const tomorrow = t.status === "fulfilled" ? t.value.tomorrow : null;
   const air = a.status === "fulfilled" ? a.value : null;
+  // 특보는 실패해도 나머지 화면은 그대로 (errors.warnings 에만 기록)
+  const warnings = wr.status === "fulfilled" ? wr.value.active : null;
+  const warnTime = wr.status === "fulfilled" ? wr.value.tmFc : null;
   const errors = {};
+  if (!warnings) errors.warnings = wr.reason?.message;
   if (!now) errors.now = n.reason?.message;
   if (!today) errors.today = t.reason?.message;
   if (!air) errors.air = a.reason?.message;
-  if (!now && !today && !air) {
+  if (!now && !today && !air && !warnings) {
     return Response.json({ error: Object.values(errors)[0] || "날씨 정보를 불러오지 못했어요", errors, grid }, { status: 502 });
   }
   return Response.json(
-    { now, today, air, outdoor: judge(now, today, air), errors, grid },
+    { now, today, tomorrow, air, warnings: warnings || [], warnTime, outdoor: judge(now, today, air, warnings), errors, grid },
     { headers: {
       "Cache-Control": "public, max-age=600",
       // Netlify CDN에 30분 저장 → 같은 학교·동네 학급들이 나눠 씀 (공공데이터 호출 한도 보호)
