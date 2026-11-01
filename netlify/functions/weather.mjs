@@ -225,7 +225,7 @@ function judge(now, today, air, warnings) {
   for (const w of warnings || []) {
     if (w.level === "경보") level = "no";
     else if (level === "ok") level = "caution";
-    reasons.push(`${w.name} 발효 중`);
+    reasons.push(w.name);
   }
   const worst = Math.max(air?.grade10 || 0, air?.grade25 || 0);
   if (worst >= 3) { level = "no"; reasons.push(worst === 4 ? "미세먼지 매우나쁨" : "미세먼지 나쁨"); }
@@ -244,6 +244,14 @@ function judge(now, today, air, warnings) {
   const umbrella = (now?.pty > 0) || (today?.rainHours?.length > 0) || (today?.popMax >= 60)
     || (warnings || []).some(w => w.kind === "호우" || w.kind === "태풍");
   return { level, reasons, umbrella };
+}
+
+// 지금부터 다음 '매시 15분'까지 남은 초 (최소 60초)
+function secondsUntilNextQuarterPast() {
+  const now = new Date();
+  const next = new Date(now); next.setUTCMinutes(15, 0, 0);
+  if (next <= now) next.setUTCHours(next.getUTCHours() + 1);
+  return Math.max(60, Math.round((next - now) / 1000));
 }
 
 export default async (req) => {
@@ -274,11 +282,14 @@ export default async (req) => {
     return Response.json({ error: Object.values(errors)[0] || "날씨 정보를 불러오지 못했어요", errors, grid }, { status: 502 });
   }
   return Response.json(
-    { now, today, tomorrow, air, warnings: warnings || [], warnTime, outdoor: judge(now, today, air, warnings), errors, grid },
+    { now, today, tomorrow, air, warnings: warnings || [], warnTime,
+      outdoor: judge(now, today, air, warnings),
+      outdoorBase: judge(now, today, air, []),       // 화면이 최신 특보를 따로 받아 덧씌울 때 쓰는 기준값
+      errors, grid },
     { headers: {
-      "Cache-Control": "public, max-age=600",
-      // Netlify CDN에 30분 저장 → 같은 학교·동네 학급들이 나눠 씀 (공공데이터 호출 한도 보호)
-      "Netlify-CDN-Cache-Control": "public, durable, max-age=1800, stale-while-revalidate=1800",
+      "Cache-Control": "public, max-age=300",
+      // Netlify CDN 저장: 다음 '매시 15분'까지만 (정각 관측값이 10분쯤 뒤 공개되므로, 화면의 매시 20분 갱신이 항상 새 값을 받음)
+      "Netlify-CDN-Cache-Control": `public, durable, max-age=${secondsUntilNextQuarterPast()}`,
     } }
   );
 };

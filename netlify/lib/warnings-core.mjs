@@ -28,8 +28,16 @@ async function getItems(url) {
   return Array.isArray(items) ? items : (items?.item ? [].concat(items.item) : []);
 }
 
-// 현재 특보 현황 원본
+// 현재 특보 현황 원본 (전국 공통 자료 → 5분 동안 함수 메모리에 두고 여러 학교가 나눠 씀)
+let statusCache = null, statusAt = 0;
+const STATUS_TTL = 5 * 60 * 1000;
 export async function fetchStatus() {
+  if (statusCache && Date.now() - statusAt < STATUS_TTL) return statusCache.item;
+  const item = await fetchStatusFresh();
+  statusCache = { item }; statusAt = Date.now();
+  return item;
+}
+async function fetchStatusFresh() {
   const q = new URLSearchParams({
     serviceKey: process.env.DATA_GO_KR_KEY || "", pageNo: "1", numOfRows: "10", dataType: "JSON",
   });

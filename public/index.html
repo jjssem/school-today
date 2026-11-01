@@ -90,6 +90,9 @@
   .signal b{font-family:"Jua",sans-serif;font-weight:400;font-size:24px}
   .signal.ok{background:#dff3e4;color:#1d6b39} .signal.caution{background:#ffe9c7;color:#8a4b00} .signal.no{background:#fbd5d5;color:#8a1f1f}
   .signal .why{font-size:16px}
+  .why-short{display:none}
+  /* 3단 배치(800×480 등)일 때만: 빨간 띠에 나온 특보는 신호등 이유에서 뺌 */
+  @media (min-width:700px) and (max-height:520px){ .why-full{display:none} .why-short{display:inline} }
   .wx .src{grid-column:1/-1;font-size:12px;color:var(--muted)}
   /* 기상특보 경보·태풍 띠 */
   .alert{grid-column:1/-1;background:#c62828;color:#fff;border-radius:14px;padding:10px 16px;font-size:18px;
@@ -470,8 +473,37 @@ function wxIcon(now, today){
   const h = new Date().getHours();
   return (h >= 18 || h < 6) ? "🌙" : "☀️";
 }
+/* 특보: 날씨와 함께 오는 것과 20분마다 따로 받는 것 중 더 최근 발표분을 씀 */
+let wxData = null, warnLatest = null;          // warnLatest = {list, tmFc}
+function currentWarnings(w){
+  const fromWx = { list: w.warnings || [], tmFc: Number(w.warnTime) || 0 };
+  if (warnLatest && warnLatest.tmFc >= fromWx.tmFc) return warnLatest;
+  return fromWx;
+}
+// 특보를 뺀 기준 판단(outdoorBase)에 최신 특보를 덧씌움 (서버 judge와 같은 규칙)
+function applyWarnings(base, list){
+  let level = base.level;
+  const rank = { ok: 0, caution: 1, no: 2 };
+  for (const x of list){
+    const need = x.level === "경보" ? "no" : "caution";
+    if (rank[need] > rank[level]) level = need;
+  }
+  return { level, reasons: [...list.map(x => x.name), ...base.reasons],
+           umbrella: base.umbrella || list.some(x => x.kind === "호우" || x.kind === "태풍") };
+}
+
 function renderWeather(w){
-  const { now, today, air, outdoor } = w;
+  wxData = w;
+  const { now, today, air } = w;
+  const warn = currentWarnings(w);
+  const outdoor = w.outdoorBase ? applyWarnings(w.outdoorBase, warn.list) : w.outdoor;
+  // 신호등 이유: 기본은 특보 모두, 3단 배치(800×480 등)에서는 빨간 띠에 나온 특보(경보·태풍)를 뺌
+  const inBar = new Set(warn.list.filter(x => x.level === "경보" || x.kind === "태풍").map(x => x.name));
+  const label = r => /^[가-힣]+(주의보|경보)$/.test(r) ? r + " 발효 중" : r;
+  const whyFull = (outdoor?.reasons || []).map(label);
+  const whyShort = (outdoor?.reasons || []).filter(r => !inBar.has(r)).map(label);
+  const whyHtml = (whyFull.length ? `<span class="why why-full">${esc(whyFull.join(" · "))}</span>` : "")
+                + (whyShort.length ? `<span class="why why-short">${esc(whyShort.join(" · "))}</span>` : "");
   const pills = [];
   if (today?.tmn != null || today?.tmx != null) pills.push(`<div class="pill">최저/최고<br><b>${today.tmn ?? "-"}° / ${today.tmx ?? "-"}°</b></div>`);
   if (today) pills.push(`<div class="pill">강수확률<br><b>${today.popMax}%</b></div>`);
@@ -484,12 +516,12 @@ function renderWeather(w){
     w.errors && Object.keys(w.errors).length ? "일부 정보를 못 불러왔어요" : "",
   ].filter(Boolean).join(" · ");
   $("weather").innerHTML = `
-    ${alertBar(w.warnings, w.warnTime)}
+    ${alertBar(warn.list, warn.tmFc)}
     <div class="big"><div class="icon">${wxIcon(now, today)}</div>
       <div class="temp">${now?.temp != null ? now.temp + "°" : "-"}<small>지금 기온${now?.humidity != null ? " · 습도 " + now.humidity + "%" : ""}</small></div></div>
     <div class="facts">${pills.join("")}</div>
     ${tomorrowRow(w.tomorrow)}
-    ${outdoor ? `<div class="signal ${outdoor.level}"><b>${SIGNAL[outdoor.level]}</b>${outdoor.reasons.length ? `<span class="why">${esc(outdoor.reasons.join(" · "))}</span>` : ""}</div>` : ""}
+    ${outdoor ? `<div class="signal ${outdoor.level}"><b>${SIGNAL[outdoor.level]}</b>${whyHtml}</div>` : ""}
     <div class="src">${src}</div>`;
 }
 // 경보 또는 태풍 특보가 있으면 맨 위 빨간 띠 (주의보는 신호등 이유에만 표시)
@@ -534,7 +566,7 @@ const fitSoon = () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitScreen,
 window.addEventListener("resize", fitSoon);
 document.fonts?.ready?.then(fitSoon);
 
-let lastWx = 0;
+let lastWx = 0, lastWarn = 0;
 async function loadWeather(){
   if (!school) return;
   lastWx = Date.now();
@@ -547,20 +579,44 @@ async function loadWeather(){
     $("weather").innerHTML = `<div class="empty" style="grid-column:1/-1">날씨 정보를 불러오지 못했어요<br><small>${esc(e.message)}</small></div>`;
   }
 }
+// 특보만 따로 확인 → 바뀌었으면 날씨 카드를 바로 다시 그림
+async function loadWarnings(){
+  if (!school) return;
+  lastWarn = Date.now();
+  try{
+    const d = await api(`/api/warnings?addr=${encodeURIComponent(school.addr)}`);
+    const next = { list: d.active || [], tmFc: Number(d.tmFc) || 0 };
+    const changed = JSON.stringify(next) !== JSON.stringify(warnLatest);
+    warnLatest = next;
+    if (changed && wxData){ renderWeather(wxData); fitSoon(); }
+  }catch(e){ /* 특보 확인 실패는 조용히 넘어감 (날씨에 딸려 오는 특보는 그대로 표시) */ }
+}
 
-/* 자동 갱신: 급식은 자정+3시간마다, 날씨는 1시간마다, 절전에서 깨어나면 필요할 때만 */
-const MEAL_MS = 3 * 60 * 60 * 1000, WX_MS = 60 * 60 * 1000;
+/* 자동 갱신 (낮 6~18시만, 밤에는 쉼)
+   - 급식: 3시간마다 + 자정(0:01)에 한 번
+   - 날씨: 매시 20분 (기상청 정각 관측·에어코리아 값이 공개된 뒤)
+   - 특보: 20분마다 따로 확인
+   - 절전에서 깨어나면: 오래된 것만 바로 다시 불러옴 */
+const MEAL_MS = 3 * 60 * 60 * 1000, WX_MS = 60 * 60 * 1000, WARN_MS = 20 * 60 * 1000;
+const daytime = () => { const h = new Date().getHours(); return h >= 6 && h < 18; };
 let timers = [];
-function stopDashboard(){ timers.forEach(t => { clearTimeout(t); clearInterval(t); }); timers = []; clearTimeout(pageTimer); page = 0; mealRows = []; }
+function stopDashboard(){ timers.forEach(t => { clearTimeout(t); clearInterval(t); }); timers = []; clearTimeout(pageTimer); page = 0; mealRows = []; wxData = null; warnLatest = null; }
 function scheduleMidnight(){
   const now = new Date();
   const next = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 0, 1);
   timers.push(setTimeout(() => { loadMeals(); scheduleMidnight(); }, next - now));
 }
+function scheduleWeather(){
+  const now = new Date();
+  const next = new Date(now); next.setMinutes(20, 0, 0);
+  if (next <= now) next.setHours(next.getHours() + 1);
+  timers.push(setTimeout(() => { if (daytime()) loadWeather(); scheduleWeather(); }, next - now));
+}
 document.addEventListener("visibilitychange", () => {
   if (document.hidden || !school || $("dashView").hidden) return;
   if (ymd(new Date()) !== lastDay || Date.now() - lastMeal > MEAL_MS) loadMeals();
   if (Date.now() - lastWx > WX_MS) loadWeather();
+  else if (Date.now() - lastWarn > WARN_MS) loadWarnings();
 });
 
 function showDashboard(){
@@ -570,15 +626,16 @@ function showDashboard(){
   $("schoolSub").textContent = school.addr.split(" ").slice(0, 3).join(" ");
   document.title = school.name + " 오늘";
   $("weather").innerHTML = '<div class="empty" style="grid-column:1/-1">날씨 불러오는 중…</div>';
-  loadMeals(); loadWeather();
-  scheduleMidnight();
-  // 날씨 자동 갱신은 06~18시에만 (밤사이 공공데이터 호출 한도 아끼기). 급식은 자정에 한 번 + 3시간마다.
-  const daytime = () => { const h = new Date().getHours(); return h >= 6 && h < 18; };
-  timers.push(setInterval(loadMeals, MEAL_MS), setInterval(() => { if (daytime()) loadWeather(); }, WX_MS));
+  loadMeals(); loadWeather(); lastWarn = Date.now();   // 처음에는 날씨에 딸려 오는 특보를 씀
+  scheduleMidnight(); scheduleWeather();
+  timers.push(
+    setInterval(() => { if (daytime()) loadMeals(); }, MEAL_MS),
+    setInterval(() => { if (daytime()) loadWarnings(); }, WARN_MS),
+  );
 }
 
 $("changeBtn").onclick = () => { store.del("school"); school = null; showPicker(); };
-$("reload").onclick = () => { loadMeals(); loadWeather(); };
+$("reload").onclick = () => { loadMeals(); loadWeather(); loadWarnings(); };
 
 /* ===== 시작 ===================================================== */
 (async function start(){

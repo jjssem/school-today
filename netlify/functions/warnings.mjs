@@ -10,7 +10,7 @@ export default async (req) => {
   try {
     const w = await warningsFor(addr);
     return Response.json({ addr, relevantKinds: RELEVANT, ...w }, {
-      headers: { "Cache-Control": "public, max-age=300", "Netlify-CDN-Cache-Control": "public, durable, max-age=600" },
+      headers: { "Cache-Control": "public, max-age=300", "Netlify-CDN-Cache-Control": "public, durable, max-age=600" },   // 최대 10분
     });
   } catch (e) {
     return Response.json({ error: e.message }, { status: 502 });
