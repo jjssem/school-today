@@ -68,7 +68,11 @@ export default async (req) => {
     const meals = rows
       .map(r => ({ date: r.MLSV_YMD, dishes: r.DDISH_NM, kcal: r.CAL_INFO }))
       .sort((a, b) => a.date.localeCompare(b.date));
-    return Response.json({ meals, school: s }, { headers: { "Cache-Control": "public, max-age=1800" } });
+    return Response.json({ meals, school: s }, { headers: {
+      "Cache-Control": "public, max-age=600",
+      // Netlify CDN에 30분 저장 → 같은 학교 학급들이 나눠 씀 (나이스 호출 최소화)
+      "Netlify-CDN-Cache-Control": "public, durable, max-age=1800, stale-while-revalidate=3600",
+    } });
   } catch (e) {
     return Response.json({ error: e.message }, { status: 502 });
   }

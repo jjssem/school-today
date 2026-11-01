@@ -33,7 +33,7 @@ export default async (req, context) => {
   const p = url.searchParams;
   const level = p.get("level");
   const pool = level && LEVEL_NAME[level] ? schools.filter(s => s.level === level) : schools;
-  const headers = { "Cache-Control": "public, max-age=3600" };
+  const headers = { "Cache-Control": "public, max-age=3600", "Netlify-CDN-Cache-Control": "public, durable, max-age=86400" };
 
   // 1) 학교 한 곳
   if (p.get("id")) {
@@ -76,7 +76,9 @@ export default async (req, context) => {
     .slice(0, Math.min(Number(p.get("limit")) || 12, 30))
     .map(({ s }) => view(s, origin));
   return Response.json({ source, origin, schools: near, meta },
-    { headers: { "Cache-Control": source === "ip" ? "private, no-store" : "public, max-age=3600" } });
+    { headers: source === "ip"
+      ? { "Cache-Control": "private, no-store" }                       // 사람마다 IP 위치가 다르므로 저장 안 함
+      : { "Cache-Control": "public, max-age=3600", "Netlify-CDN-Cache-Control": "public, durable, max-age=86400" } });
 };
 
 export const config = { path: "/api/schools" };

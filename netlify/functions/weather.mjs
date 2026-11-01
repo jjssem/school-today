@@ -241,7 +241,11 @@ export default async (req) => {
   }
   return Response.json(
     { now, today, air, outdoor: judge(now, today, air), errors, grid },
-    { headers: { "Cache-Control": "public, max-age=900" } }   // 15분 캐시
+    { headers: {
+      "Cache-Control": "public, max-age=600",
+      // Netlify CDN에 30분 저장 → 같은 학교·동네 학급들이 나눠 씀 (공공데이터 호출 한도 보호)
+      "Netlify-CDN-Cache-Control": "public, durable, max-age=1800, stale-while-revalidate=1800",
+    } }
   );
 };
 
