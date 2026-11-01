@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>우리 학교 오늘</title>
+<meta name="description" content="내 위치에서 가까운 학교의 오늘·내일 급식과 날씨·미세먼지">
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Jua&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#fdf8ef; --card:#ffffff; --ink:#2b2a27; --muted:#7a756b;
+    --accent:#e8743b; --accent2:#3b8f6b; --line:#efe6d6; --chip:#fff1e3;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#1d1c1a; --card:#2a2826; --ink:#f2eee6; --muted:#a8a194;
+      --accent:#f08a54; --accent2:#5cb38c; --line:#3a3733; --chip:#3a2e24; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Gowun Dodum",system-ui,sans-serif;min-height:100vh}
+  .wrap{max-width:880px;margin:0 auto;padding:28px 16px 40px}
+  header{text-align:center;margin-bottom:22px}
+  h1{font-family:"Jua",sans-serif;font-weight:400;font-size:clamp(28px,6vw,42px);margin:0;letter-spacing:-.5px}
+  h1 span{color:var(--accent)}
+  .sub{color:var(--muted);margin-top:6px}
+  .link{font:inherit;border:0;background:none;color:var(--accent);cursor:pointer;text-decoration:underline;padding:0}
+  .card{background:var(--card);border:2px solid var(--line);border-radius:22px;padding:20px 22px;box-shadow:0 6px 0 var(--line)}
+  .empty{padding:18px 0;color:var(--muted);font-size:18px;text-align:center}
+  .err{background:#fde8e8;color:#8a1f1f;border-radius:14px;padding:14px;margin-top:16px;display:none}
+  footer{text-align:center;color:var(--muted);font-size:13px;margin-top:24px;line-height:1.6}
+  [hidden]{display:none !important}
+
+  /* ── 학교 고르기 ── */
+  .search{display:flex;gap:8px;margin-bottom:12px}
+  .search input{flex:1;min-width:0;font:inherit;font-size:18px;padding:12px 14px;border-radius:14px;border:2px solid var(--line);
+    background:var(--card);color:var(--ink)}
+  .search input:focus{outline:none;border-color:var(--accent)}
+  .btn{font:inherit;font-size:16px;border:0;border-radius:14px;padding:0 16px;background:var(--accent);color:#fff;cursor:pointer;white-space:nowrap}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+  .chips button{font:inherit;font-size:15px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:5px 14px;cursor:pointer}
+  .chips button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .where{color:var(--muted);font-size:15px;margin:0 2px 10px}
+  .list{padding:4px 0}
+  .sch{display:flex;align-items:center;gap:12px;width:100%;text-align:left;font:inherit;color:inherit;background:none;border:0;
+    border-bottom:1px dashed var(--line);padding:12px 18px;cursor:pointer}
+  .sch:last-child{border-bottom:0}
+  .sch:hover{background:var(--chip)}
+  .sch .lv{flex:none;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-family:"Jua",sans-serif;color:#fff;background:var(--accent)}
+  .sch .lv.m{background:var(--accent2)} .sch .lv.h{background:#5b6fb5}
+  .sch .nm{font-size:19px}
+  .sch .ad{font-size:13px;color:var(--muted);margin-top:2px}
+  .sch .dt{margin-left:auto;flex:none;font-size:14px;color:var(--muted)}
+
+  /* ── 대시보드 ── */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+  .card h2{font-family:"Jua",sans-serif;font-weight:400;font-size:24px;margin:0;display:flex;align-items:baseline;gap:8px}
+  .badge{font-size:14px;background:var(--accent);color:#fff;border-radius:99px;padding:2px 10px}
+  .card.tmr .badge{background:var(--accent2)}
+  .date{color:var(--muted);font-size:15px;margin:4px 0 14px}
+  ul{list-style:none;margin:0;padding:0}
+  li{padding:9px 0;border-bottom:1px dashed var(--line);font-size:20px;display:flex;justify-content:space-between;gap:8px}
+  li:last-child{border-bottom:0}
+  .alg{font-size:12px;color:var(--muted);white-space:nowrap;align-self:center}
+  .kcal{margin-top:12px;font-size:14px;color:var(--muted)}
+  .next{margin-top:10px;background:var(--chip);border-radius:14px;padding:12px 14px;font-size:15px}
+  .next b{font-family:"Jua",sans-serif;font-weight:400}
+
+  .wx{margin-bottom:16px;display:grid;grid-template-columns:auto 1fr;gap:6px 22px;align-items:center}
+  .wx .big{display:flex;align-items:center;gap:10px}
+  .wx .icon{font-size:56px;line-height:1}
+  .wx .temp{font-family:"Jua",sans-serif;font-size:48px;line-height:1}
+  .wx .temp small{font-size:18px;color:var(--muted);font-family:"Gowun Dodum",sans-serif;display:block;margin-top:4px}
+  .wx .facts{display:flex;flex-wrap:wrap;gap:8px}
+  .pill{background:var(--chip);border-radius:12px;padding:8px 12px;font-size:16px;line-height:1.3}
+  .pill b{font-family:"Jua",sans-serif;font-weight:400;font-size:19px}
+  .g1{background:#dceefe;color:#0b4f8a} .g2{background:#dff3e4;color:#1d6b39}
+  .g3{background:#ffe9c7;color:#8a4b00} .g4{background:#fbd5d5;color:#8a1f1f}
+  .signal{grid-column:1/-1;border-radius:16px;padding:12px 16px;font-size:20px;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+  .signal b{font-family:"Jua",sans-serif;font-weight:400;font-size:24px}
+  .signal.ok{background:#dff3e4;color:#1d6b39} .signal.caution{background:#ffe9c7;color:#8a4b00} .signal.no{background:#fbd5d5;color:#8a1f1f}
+  .signal .why{font-size:16px}
+  .wx .src{grid-column:1/-1;font-size:12px;color:var(--muted)}
+  @media (max-width:520px){ .wx{grid-template-columns:1fr} }
+
+  /* 낮은 가로 화면(1024×768 태블릿·모니터)에서는 한 화면에 들어오도록 촘촘하게 */
+  @media (min-width:700px) and (max-height:860px){
+    .wrap{padding:10px 16px 8px;max-width:980px}
+    header{margin-bottom:8px;display:flex;justify-content:center;align-items:baseline;gap:12px;flex-wrap:wrap}
+    h1{font-size:30px}
+    .sub{margin-top:0;font-size:14px}
+    .card{padding:12px 18px;border-radius:18px;box-shadow:0 4px 0 var(--line)}
+    .wx{margin-bottom:10px;gap:6px 18px}
+    .wx .icon{font-size:42px}
+    .wx .temp{font-size:38px}
+    .wx .temp small{font-size:15px;margin-top:2px}
+    .pill{padding:6px 10px;font-size:14px}
+    .pill b{font-size:17px}
+    .signal{padding:7px 14px;font-size:17px}
+    .signal b{font-size:20px}
+    .signal .why{font-size:15px}
+    .grid{gap:12px}
+    .card h2{font-size:21px}
+    .date{margin:2px 0 6px;font-size:14px}
+    li{padding:5px 0;font-size:18px}
+    .kcal{margin-top:6px;font-size:13px}
+    .empty{padding:10px 0}
+    .next{margin-top:6px;padding:8px 12px}
+    footer{margin-top:8px;font-size:12px}
+    .sch{padding:8px 16px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ① 학교 고르기 -->
+  <div id="pickView" hidden>
+    <header>
+      <h1>🏫 우리 학교 <span>오늘</span></h1>
+      <div class="sub">학교를 고르면 오늘·내일 급식과 날씨를 보여 드려요</div>
+    </header>
+    <form class="search" id="searchForm">
+      <input id="q" type="search" placeholder="학교 이름 검색" autocomplete="off">
+      <button class="btn" type="button" id="locBtn">📍 내 위치</button>
+    </form>
+    <div class="chips" id="chips"></div>
+    <div class="where" id="where">위치를 확인하는 중…</div>
+    <div class="card list" id="list" style="padding:4px 0"><div class="empty">불러오는 중…</div></div>
+  </div>
+
+  <!-- ② 오늘의 학교 -->
+  <div id="dashView" hidden>
+    <header>
+      <h1 id="schoolTitle">🏫 <span></span></h1>
+      <div class="sub"><span id="schoolSub"></span> · <button class="link" id="changeBtn">학교 바꾸기</button></div>
+    </header>
+    <section class="card wx" id="weather"><div class="empty" style="grid-column:1/-1">날씨 불러오는 중…</div></section>
+    <div class="grid">
+      <section class="card" id="today"><h2>오늘 <span class="badge">TODAY</span></h2><div class="date"></div><div class="body"><div class="empty">불러오는 중…</div></div></section>
+      <section class="card tmr" id="tomorrow"><h2>내일 <span class="badge">TOMORROW</span></h2><div class="date"></div><div class="body"><div class="empty">불러오는 중…</div></div></section>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <footer>
+    <span id="srcLine">자료: 나이스 교육정보 개방 포털 · 기상청 · 에어코리아</span><br>
+    <span id="dataDate">학교 위치 자료: 전국초중등학교위치표준데이터</span>
+    <span id="reloadWrap" hidden> · <button class="link" id="reload">새로고침</button></span>
+  </footer>
+</div>
+
+<script>
+/* ===== 공통 ===================================================== */
+const ALLERGY = ["","난류","우유","메밀","땅콩","대두","밀","고등어","게","새우","돼지고기","복숭아","토마토","아황산류","호두","닭고기","쇠고기","오징어","조개류","잣"];
+const WEEK = ["일","월","화","수","목","금","토"];
+const LV = { e: "초", m: "중", h: "고" };
+const $ = id => document.getElementById(id);
+const ymd = d => d.getFullYear()+String(d.getMonth()+1).padStart(2,"0")+String(d.getDate()).padStart(2,"0");
+const kDate = d => `${d.getMonth()+1}월 ${d.getDate()}일 (${WEEK[d.getDay()]})`;
+const parseYmd = s => new Date(+s.slice(0,4), +s.slice(4,6)-1, +s.slice(6,8));
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const store = {
+  get(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } },
+  set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} },
+  del(k){ try{ localStorage.removeItem(k); }catch(e){} },
+};
+async function api(path){
+  const res = await fetch(path);
+  let data = {}; try{ data = await res.json(); }catch(e){}
+  if (!res.ok) throw new Error(data.error || ("서버 오류 (" + res.status + ")"));
+  return data;
+}
+function showMeta(meta){
+  if (meta?.baseDate) $("dataDate").textContent =
+    `학교 위치 자료: 전국초중등학교위치표준데이터 (데이터기준일 ${meta.baseDate} · ${Number(meta.count).toLocaleString()}개 학교)`;
+}
+
+/* ===== ① 학교 고르기 ============================================ */
+let level = "";          // "" 전체, e 초, m 중, h 고
+let here = null;         // {lat, lon, source}
+let searchTimer = null;
+
+const chipsEl = $("chips");
+[["","전체"],["e","초등학교"],["m","중학교"],["h","고등학교"]].forEach(([v, label]) => {
+  const b = document.createElement("button");
+  b.type = "button"; b.textContent = label; b.dataset.v = v;
+  b.onclick = () => { level = v; markChips(); refreshList(); };
+  chipsEl.appendChild(b);
+});
+function markChips(){ [...chipsEl.children].forEach(b => b.className = b.dataset.v === level ? "on" : ""); }
+
+function renderList(schools, emptyMsg, showDist = true){
+  const list = $("list");
+  if (!schools.length){ list.innerHTML = `<div class="empty">${emptyMsg || "학교를 찾지 못했어요"}</div>`; return; }
+  list.innerHTML = schools.map(s => `
+    <button class="sch" data-id="${esc(s.id)}">
+      <span class="lv ${s.level}">${LV[s.level] || "?"}</span>
+      <span><div class="nm">${esc(s.name)}</div><div class="ad">${esc(s.addr)}</div></span>
+      ${showDist && s.dist != null ? `<span class="dt">${s.dist < 1 ? Math.round(s.dist*1000)+"m" : s.dist.toFixed(1)+"km"}</span>` : ""}
+    </button>`).join("");
+  list.querySelectorAll(".sch").forEach(b => b.onclick = () => {
+    const s = schools.find(x => x.id === b.dataset.id);
+    chooseSchool(s);
+  });
+}
+
+async function loadNearby(){
+  const lv = level ? `&level=${level}` : "";
+  try{
+    const data = here?.source === "gps"
+      ? await api(`/api/schools?lat=${here.lat}&lon=${here.lon}${lv}`)
+      : await api(`/api/schools?${lv.slice(1)}`);           // 접속 IP 기준
+    showMeta(data.meta);
+    if (data.source === "ip"){
+      here = { lat: data.origin.lat, lon: data.origin.lon, source: "ip" };
+      $("where").innerHTML = `🌐 접속한 인터넷 주소 기준 <b>대략적인 위치</b>${data.origin.city ? " (" + esc(data.origin.city) + " 근처)" : ""}예요. 정확하지 않으면 <b>📍 내 위치</b>를 누르거나 이름으로 찾아 주세요.`;
+    } else if (data.source === "gps"){
+      $("where").textContent = "📍 내 위치에서 가까운 학교";
+    } else {
+      $("where").textContent = "위치를 알 수 없어요. 학교 이름으로 찾아 주세요.";
+    }
+    renderList(data.schools, "근처에 학교가 없어요", data.source === "gps");   // IP 위치는 대략적이라 거리 숨김
+  }catch(e){
+    $("where").textContent = "학교 목록을 불러오지 못했어요: " + e.message;
+    renderList([], "—");
+  }
+}
+
+async function runSearch(){
+  const q = $("q").value.trim();
+  if (!q){ loadNearby(); return; }
+  const lv = level ? `&level=${level}` : "";
+  const near = here ? `&lat=${here.lat}&lon=${here.lon}` : "";
+  try{
+    const data = await api(`/api/schools?q=${encodeURIComponent(q)}${lv}${near}`);
+    showMeta(data.meta);
+    $("where").textContent = `'${q}' 검색 결과 ${data.total}곳` + (data.total > 30 ? " (가까운 30곳만 보여요)" : "");
+    renderList(data.schools, "이름이 맞는 학교가 없어요");
+  }catch(e){ renderList([], e.message); }
+}
+function refreshList(){ $("q").value.trim() ? runSearch() : loadNearby(); }
+
+// 브라우저 위치 (GPS·와이파이). 실패하면 접속 IP 기준으로.
+function locate(){
+  $("where").textContent = "📍 위치를 확인하는 중…";
+  if (!("geolocation" in navigator)){ loadNearby(); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => { here = { lat: +pos.coords.latitude.toFixed(5), lon: +pos.coords.longitude.toFixed(5), source: "gps" }; $("q").value = ""; loadNearby(); },
+    ()  => { here = null; loadNearby(); },
+    { enableHighAccuracy: false, timeout: 8000, maximumAge: 10 * 60 * 1000 }
+  );
+}
+
+$("q").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 300); });
+$("searchForm").addEventListener("submit", e => { e.preventDefault(); runSearch(); });
+$("locBtn").onclick = locate;
+
+function showPicker(){
+  stopDashboard();
+  $("dashView").hidden = true; $("pickView").hidden = false; $("reloadWrap").hidden = true;
+  document.title = "우리 학교 오늘";
+  history.replaceState(null, "", location.pathname);
+  markChips();
+  if (!$("list").querySelector(".sch")) locate();
+}
+
+/* ===== ② 오늘의 학교 ============================================ */
+let school = null;
+
+function chooseSchool(s){
+  school = s;
+  store.set("school", s);
+  history.replaceState(null, "", "?s=" + encodeURIComponent(s.id));   // 이 주소를 즐겨찾기·QR로 쓰면 바로 이 학교
+  showDashboard();
+}
+
+function parseDishes(raw){
+  return raw.split(/<br\s*\/?>/i).map(s => s.trim()).filter(Boolean).map(s => {
+    const m = s.match(/\(([\d.\s]+)\)\s*$/);
+    const nums = m ? m[1].split(".").map(n=>+n).filter(n=>n>0 && n<ALLERGY.length) : [];
+    const name = s.replace(/\(([\d.\s]+)\)\s*$/,"").replace(/[*#@]+$/,"").trim();
+    return { name, allergy: nums.map(n=>ALLERGY[n]) };
+  });
+}
+
+function renderMeal(el, date, meal, nextMeal){
+  el.querySelector(".date").textContent = kDate(date);
+  const body = el.querySelector(".body");
+  if (!meal){
+    const weekend = date.getDay()===0 || date.getDay()===6;
+    let html = `<div class="empty">${weekend ? "쉬는 날이에요 😴" : "급식이 없어요"}</div>`;
+    if (nextMeal){
+      const names = parseDishes(nextMeal.dishes).map(x=>esc(x.name)).join(", ");
+      html += `<div class="next"><b>다음 급식 · ${kDate(parseYmd(nextMeal.date))}</b><br>${names}</div>`;
+    }
+    body.innerHTML = html; return;
+  }
+  body.innerHTML = "<ul>" + parseDishes(meal.dishes).map(d =>
+    `<li><span>${esc(d.name)}</span>${d.allergy.length?`<span class="alg" title="알레르기 유발 식품">${d.allergy.join("·")}</span>`:""}</li>`
+  ).join("") + "</ul>" + (meal.kcal ? `<div class="kcal">🔥 ${esc(meal.kcal)}</div>` : "");
+}
+
+let lastMeal = 0, lastDay = "";
+async function loadMeals(){
+  if (!school) return;
+  lastMeal = Date.now(); lastDay = ymd(new Date());
+  const err = $("err"); err.style.display = "none";
+  const today = new Date(); today.setHours(0,0,0,0);
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate()+1);
+  const until = new Date(today); until.setDate(today.getDate()+14);
+  try{
+    const data = await api(`/api/meal?name=${encodeURIComponent(school.name)}&addr=${encodeURIComponent(school.addr)}&from=${ymd(today)}&to=${ymd(until)}`);
+    const rows = data.meals || [];
+    const byDay = Object.fromEntries(rows.map(r=>[r.date, r]));
+    const next = rows.find(r => r.date > ymd(tomorrow));
+    renderMeal($("today"), today, byDay[ymd(today)], next);
+    renderMeal($("tomorrow"), tomorrow, byDay[ymd(tomorrow)], next);
+  }catch(e){
+    err.textContent = "⚠️ 급식: " + e.message; err.style.display = "block";
+    document.querySelectorAll("#dashView .grid .body").forEach(b => b.innerHTML = '<div class="empty">—</div>');
+  }
+}
+
+const GRADE = ["", "좋음", "보통", "나쁨", "매우나쁨"];
+const SIGNAL = { ok: "⭕ 운동장 활동 좋아요", caution: "⚠️ 운동장 활동 주의", no: "❌ 실내 활동 권장" };
+function wxIcon(now, today){
+  const pty = now?.pty || today?.pty || 0;
+  if (pty === 3 || pty === 7) return "❄️";
+  if (pty === 2 || pty === 6) return "🌨️";
+  if (pty > 0) return "🌧️";
+  if (today?.sky === 4) return "☁️";
+  if (today?.sky === 3) return "⛅";
+  const h = new Date().getHours();
+  return (h >= 18 || h < 6) ? "🌙" : "☀️";
+}
+function renderWeather(w){
+  const { now, today, air, outdoor } = w;
+  const pills = [];
+  if (today?.tmn != null || today?.tmx != null) pills.push(`<div class="pill">최저/최고<br><b>${today.tmn ?? "-"}° / ${today.tmx ?? "-"}°</b></div>`);
+  if (today) pills.push(`<div class="pill">강수확률<br><b>${today.popMax}%</b></div>`);
+  if (air?.pm10 != null) pills.push(`<div class="pill g${air.grade10}">미세먼지<br><b>${GRADE[air.grade10]}</b> ${air.pm10}</div>`);
+  if (air?.pm25 != null) pills.push(`<div class="pill g${air.grade25}">초미세먼지<br><b>${GRADE[air.grade25]}</b> ${air.pm25}</div>`);
+  if (outdoor?.umbrella) pills.push(`<div class="pill">☂️<br><b>우산 챙기기</b></div>`);
+  const src = [
+    now ? `기상청 ${now.time} 관측` : "",
+    air ? `에어코리아 ${esc(air.station)} 측정소${air.distKm != null ? " (" + air.distKm + "km)" : ""}` : "",
+    w.errors && Object.keys(w.errors).length ? "일부 정보를 못 불러왔어요" : "",
+  ].filter(Boolean).join(" · ");
+  $("weather").innerHTML = `
+    <div class="big"><div class="icon">${wxIcon(now, today)}</div>
+      <div class="temp">${now?.temp != null ? now.temp + "°" : "-"}<small>지금 기온${now?.humidity != null ? " · 습도 " + now.humidity + "%" : ""}</small></div></div>
+    <div class="facts">${pills.join("")}</div>
+    ${outdoor ? `<div class="signal ${outdoor.level}"><b>${SIGNAL[outdoor.level]}</b>${outdoor.reasons.length ? `<span class="why">${esc(outdoor.reasons.join(" · "))}</span>` : ""}</div>` : ""}
+    <div class="src">${src}</div>`;
+}
+let lastWx = 0;
+async function loadWeather(){
+  if (!school) return;
+  lastWx = Date.now();
+  try{
+    // 좌표를 소수 둘째 자리(약 1km)로 맞춰 같은 동네 학교끼리 캐시를 함께 씀
+    const data = await api(`/api/weather?lat=${school.lat.toFixed(2)}&lon=${school.lon.toFixed(2)}&sido=${encodeURIComponent(school.addr)}`);
+    renderWeather(data);
+  }catch(e){
+    $("weather").innerHTML = `<div class="empty" style="grid-column:1/-1">날씨 정보를 불러오지 못했어요<br><small>${esc(e.message)}</small></div>`;
+  }
+}
+
+/* 자동 갱신: 급식은 자정+3시간마다, 날씨는 1시간마다, 절전에서 깨어나면 필요할 때만 */
+const MEAL_MS = 3 * 60 * 60 * 1000, WX_MS = 60 * 60 * 1000;
+let timers = [];
+function stopDashboard(){ timers.forEach(t => { clearTimeout(t); clearInterval(t); }); timers = []; }
+function scheduleMidnight(){
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 0, 1);
+  timers.push(setTimeout(() => { loadMeals(); scheduleMidnight(); }, next - now));
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || !school || $("dashView").hidden) return;
+  if (ymd(new Date()) !== lastDay || Date.now() - lastMeal > MEAL_MS) loadMeals();
+  if (Date.now() - lastWx > WX_MS) loadWeather();
+});
+
+function showDashboard(){
+  stopDashboard();
+  $("pickView").hidden = true; $("dashView").hidden = false; $("reloadWrap").hidden = false;
+  $("schoolTitle").innerHTML = `🏫 <span>${esc(school.name)}</span>`;
+  $("schoolSub").textContent = school.addr.split(" ").slice(0, 3).join(" ");
+  document.title = school.name + " 오늘";
+  $("weather").innerHTML = '<div class="empty" style="grid-column:1/-1">날씨 불러오는 중…</div>';
+  loadMeals(); loadWeather();
+  scheduleMidnight();
+  timers.push(setInterval(loadMeals, MEAL_MS), setInterval(loadWeather, WX_MS));
+}
+
+$("changeBtn").onclick = () => { store.del("school"); school = null; showPicker(); };
+$("reload").onclick = () => { loadMeals(); loadWeather(); };
+
+/* ===== 시작 ===================================================== */
+(async function start(){
+  const id = new URLSearchParams(location.search).get("s");
+  const saved = store.get("school");
+  if (id){
+    try{
+      const data = await api(`/api/schools?id=${encodeURIComponent(id)}`);
+      showMeta(data.meta);
+      chooseSchool(data.school);
+      return;
+    }catch(e){ /* 없는 학교면 고르기 화면으로 */ }
+  } else if (saved?.id){
+    school = saved;
+    history.replaceState(null, "", "?s=" + encodeURIComponent(saved.id));
+    showDashboard();
+    api(`/api/schools?id=${encodeURIComponent(saved.id)}`).then(d => showMeta(d.meta)).catch(() => {});
+    return;
+  }
+  showPicker();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+[build]
+  # 배포할 때마다 data/ 폴더의 학교 CSV를 generated/schools.json 으로 변환
+  command = "node tools/build-schools.mjs"
+  publish = "public"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  node_bundler = "esbuild"
